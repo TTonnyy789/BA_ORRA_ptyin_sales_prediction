@@ -17,7 +17,7 @@ from sklearn.metrics import mean_squared_error
 
 
 # Read the data and understanding our data set, assign your personal file path for the purpose of loading data
-product = pd.read_csv("/Users/ttonny0326/BA_ORRA/Python_Programming/Products_Information.csv")
+product = pd.read_csv("/Users/ttonny0326/GitHub_Project/BA_ORRA_python_Grocery_prediction/Products_Information.csv")
 
 
 # Using info() and head() functions to briefly read the overall structure
