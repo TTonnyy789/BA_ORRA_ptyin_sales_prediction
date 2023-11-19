@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from statsmodels.tsa.arima.model import ARIMA
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import accuracy_score, mean_squared_error, confusion_matrix, precision_score, recall_score, ConfusionMatrixDisplay
 
@@ -29,13 +29,14 @@ class StationarySalesForecaster:
             segmented_data[(store, product_type)] = group[['sales', 'special_offer', 'id']]
 
     # Initial the self values in the StationarySalesForecaster class
-    def __init__(self, store_number, product_type, order=(8, 2, 6), train_end_date='2016-12-31', validation_end_date='2017-07-31'):
-        # self.segmented_data = segmented_data
+    def __init__(self, store_number, product_type, order=(8, 2, 6), train_end_date='2016-12-31', validation_end_date='2017-07-31'):  # self.segmented_data = segmented_data
         self.store_number = store_number
         self.product_type = product_type
         self.order = order
         self.train_end_date = train_end_date
         self.validation_end_date = validation_end_date
+        # self.n_estimators = n_estimators
+        # self.max_depth = max_depth
         self.model = None
 
     def arima_fit(self):
@@ -76,7 +77,95 @@ class StationarySalesForecaster:
 
         # Evaluate the model's performance
         mse = mean_squared_error(test_data, forecast)
-        print("Mean Squared Error:", mse)
+        print("ARIMA Mean Squared Error:", mse)
+
+    def create_lag_features(self, lags=12):
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)].copy()
+        for lag in range(1, lags + 1):
+            specific_segment[f'lag_{lag}'] = specific_segment['sales'].shift(lag)
+        self.segmented_data[(self.store_number, self.product_type)] = specific_segment
+
+    
+    def randomforest_predict(self, lags=12):
+        from sklearn.ensemble import RandomForestRegressor
+        self.create_lag_features(lags=lags)
+        
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+
+        # Splitting the data
+        train_data = specific_segment[:self.train_end_date].dropna()
+        test_data = specific_segment[self.validation_end_date:].dropna()
+
+        # Prepare features and target
+        feature_cols = [col for col in train_data.columns if col != 'sales']
+        X_train = train_data[feature_cols]
+        y_train = train_data['sales']
+        X_test = test_data[feature_cols]
+
+        # Train Random Forest model
+        rf_model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=1)
+        rf_model.fit(X_train, y_train)
+        rf_predictions = rf_model.predict(X_test)
+
+        # Plotting
+        plt.figure(figsize=(12,6))
+        plt.plot(test_data.index, rf_predictions, color='green', label='RF Predicted Sales')
+        plt.plot(test_data.index, test_data['sales'], color='red', label='Actual Sales')
+        plt.title('Sales Forecast vs Actuals')
+        plt.xlabel('Date')
+        plt.ylabel('Sales')
+        plt.legend()
+        plt.show()
+
+        # Model evaluation
+        mse_rf = mean_squared_error(test_data['sales'], rf_predictions)
+        print("Random Forest Mean Squared Error:", mse_rf)
+    
+    def optimize_randomforest(self, max_lag=12, cv_splits=3):
+        from sklearn.ensemble import RandomForestRegressor
+        from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit
+        # Best parameters initialization
+        best_mse = float('inf')
+        best_lag = 0
+        best_params = None
+
+        for lag in range(1, max_lag + 1):
+            self.create_lag_features(lags=lag)
+            specific_segment = self.segmented_data[(self.store_number, self.product_type)].dropna()
+            
+            # Splitting the data
+            train_data = specific_segment[:self.train_end_date]
+            feature_cols = [col for col in train_data.columns if col != 'sales']
+            X_train = train_data[feature_cols]
+            y_train = train_data['sales']
+
+            # Parameter grid for Random Forest
+            param_grid = {
+                'n_estimators': [100, 200, 300],
+                'max_depth': [10, 20, 30],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4]
+            }
+
+            # Time series cross-validator
+            tscv = TimeSeriesSplit(n_splits=cv_splits)
+
+            # Grid Search with cross-validation
+            rf = RandomForestRegressor(random_state=1)
+            grid_search = GridSearchCV(estimator=rf, param_grid=param_grid, cv=tscv, scoring='neg_mean_squared_error', n_jobs=-1)
+            grid_search.fit(X_train, y_train)
+
+            # Evaluate the best model
+            best_model_mse = -grid_search.best_score_
+            if best_model_mse < best_mse:
+                best_mse = best_model_mse
+                best_lag = lag
+                best_params = grid_search.best_params_
+
+        # Output the best settings
+        print(f"Best MSE: {best_mse}")
+        print(f"Best Lag: {best_lag}")
+        print(f"Best Parameters: {best_params}")
 
     
 
