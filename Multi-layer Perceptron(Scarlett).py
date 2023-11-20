@@ -1,9 +1,4 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Nov 17 14:07:01 2023
-
-@author: sharo
-"""
+#%%#
 ### Multi-layer Perceptron ###
 import numpy as np
 import pandas as pd
@@ -12,7 +7,8 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
 
-product = pd.read_csv('C:\\Users\\sharo\\Dropbox\\PC\\Desktop\\Courses\\73701_Python\\Group Project\\code\\Products_Information\\Products_Information.csv')
+
+product = pd.read_csv('/Users/ttonny0326/GitHub_Project/BA_ORRA_python_Grocery_prediction/Products_Information.csv')
 # Convert the 'date' column to datetime format and set it as the index
 product['date'] = pd.to_datetime(product['date'])
 product.set_index('date', inplace=True)
@@ -85,3 +81,6 @@ X_future.index = future_dates
 future_predictions = mlp.predict(X_future)
 
 future_predictions[0:15]
+
+
+# %%
