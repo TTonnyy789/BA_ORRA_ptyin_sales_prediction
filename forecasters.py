@@ -245,6 +245,52 @@ class StationarySalesForecaster:
         # Evaluating the model's performance
         r2_EXfeature_lgb = r2_score(Y_test, y_predict)
         print("LightGBM r2_score:", r2_EXfeature_lgb)
+    
+    def optimize_date_lightgbm(self, max_lag=12, cv_splits=3):
+        import lightgbm as lgb
+        from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit
+        # Best parameters initialization
+        best_mse = float('inf')
+        best_lag = 0
+        best_params = None
+
+        for lag in range(1, max_lag + 1):
+            self.create_lag_features(lags=lag)
+            specific_segment = self.segmented_data[(self.store_number, self.product_type)].dropna()
+            
+            # Splitting the data
+            train_data = specific_segment[:self.train_end_date]
+            feature_cols = [col for col in train_data.columns if col != 'sales']
+            X_train = train_data[feature_cols]
+            y_train = train_data['sales']
+
+            # Parameter grid for LightGBM
+            param_grid = {
+                'n_estimators': [100, 200, 300],
+                'max_depth': [10, 20, 30],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4]
+            }
+
+            # Time series cross-validator
+            tscv = TimeSeriesSplit(n_splits=cv_splits)
+
+            # Grid Search with cross-validation
+            lgb_model = lgb.LGBMRegressor(random_state=1)
+            grid_search = GridSearchCV(estimator=lgb_model, param_grid=param_grid, cv=tscv, scoring='neg_mean_squared_error', n_jobs=-1)
+            grid_search.fit(X_train, y_train)
+
+            # Evaluate the best model
+            best_model_mse = -grid_search.best_score_
+            if best_model_mse < best_mse:
+                best_mse = best_model_mse
+                best_lag = lag
+                best_params = grid_search.best_params_
+
+        # Output the best settings
+        print(f"Best MSE: {best_mse}")
+        print(f"Best Lag: {best_lag}")
+        print(f"Best Parameters: {best_params}")
 
     
 

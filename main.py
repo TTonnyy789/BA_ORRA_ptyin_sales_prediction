@@ -570,7 +570,7 @@ print(test_data)
 ### Step 7-4  ####################################################################
 ### Import the class from forecasters to conduct fitting and forecasting
 
-from forcasters import StationarySalesForecaster, NonStationarySalesForecaster, ZeroSalesForecaster
+from forecasters import StationarySalesForecaster, NonStationarySalesForecaster, ZeroSalesForecaster
 
 store1_beauty = StationarySalesForecaster(store_number=1, product_type='BEAUTY')
 store1_beauty.arima_fit()
@@ -628,62 +628,9 @@ print('Mean Squared Error:', mse)
 
 #%%#
 ### Step 7-3  ####################################################################
-### Grid search for the best arguments for the ARIMA model (p, d, q) from 0 to 9
-import itertools
+### 
 
-# Store number and product type for which to forecast sales
-store_number = 1
-product_type = 'BEAUTY'
 
-# Retrieve the specific segment of the data
-specific_segment = segmented_data[(store_number, product_type)]
-
-# Ensuring the date index is in datetime format
-specific_segment.index = pd.to_datetime(specific_segment.index)
-
-# Defining the split dates
-train_end_date = '2016-12-31'
-validation_end_date = '2017-07-31'
-
-# Splitting the data
-train_data = specific_segment[:train_end_date]['sales']
-validation_data = specific_segment[train_end_date:validation_end_date]['sales']
-test_data = specific_segment[validation_end_date:]['sales']
-
-# Hyperparameter tuning for ARIMA
-p = d = q = range(0, 10)
-pdq = list(itertools.product(p, d, q))
-
-best_mse = float('inf')
-best_order = None
-best_model = None
-
-for order in pdq:
-    try:
-        model = ARIMA(train_data, order=order)
-        model_fit = model.fit()
-        predictions = model_fit.forecast(len(validation_data))
-        mse = mean_squared_error(validation_data, predictions)
-        if mse < best_mse:
-            best_mse = mse
-            best_order = order
-            best_model = model_fit
-    except:
-        continue
-
-print(f"Best ARIMA Order: {best_order}")
-print(f"Best MSE: {best_mse}")
-
-# Retraining the best model on the full dataset (train + validation)
-best_model_full = ARIMA(pd.concat([train_data, validation_data]), order=best_order)
-best_model_full = best_model_full.fit()
-
-# Forecasting on the test set
-test_predictions = best_model_full.forecast(len(test_data))
-
-# Evaluating performance on the test set
-test_mse = mean_squared_error(test_data, test_predictions)
-print(f"Test MSE: {test_mse}")
 
 
 # %%#
