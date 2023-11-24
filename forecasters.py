@@ -89,29 +89,33 @@ class StationarySalesForecaster:
     
     def randomforest_date_predict(self, lags=12):
         from sklearn.ensemble import RandomForestRegressor
+        from sklearn.metrics import r2_score, mean_absolute_error
+
         self.create_lag_features(lags=lags)
-        
         specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+        specific_segment.dropna(inplace=True)  # Drop rows with NaNs
 
-        # Splitting the data
-        train_data = specific_segment[:self.train_end_date].dropna()
-        test_data = specific_segment[self.validation_end_date:].dropna()
-
-        # Prepare features and target
-        feature_cols = [col for col in train_data.columns if col != 'sales']
-        X_train = train_data[feature_cols]
-        y_train = train_data['sales']
-        X_test = test_data[feature_cols]
+        # Prepare the features and target variable
+        lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        X_train = specific_segment[:self.validation_end_date][lag_columns].values
+        Y_train = specific_segment[:self.validation_end_date]['sales']
+        
+        X_test = specific_segment[self.validation_end_date:][lag_columns].values
+        Y_test = specific_segment[self.validation_end_date:]['sales']
 
         # Train Random Forest model
-        rf_model = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
-        rf_model.fit(X_train, y_train)
+        rf_model = RandomForestRegressor(n_estimators=100, 
+                                        max_depth=10, 
+                                        random_state=42
+                                        )
+        
+        rf_model.fit(X_train, Y_train)
         rf_predictions = rf_model.predict(X_test)
 
         # Plotting
         plt.figure(figsize=(12,6))
-        plt.plot(test_data.index, rf_predictions, color='green', label='RF Predicted Sales')
-        plt.plot(test_data.index, test_data['sales'], color='red', label='Actual Sales')
+        plt.plot(Y_test.index, rf_predictions, color='green', label='RF Predicted Sales')
+        plt.plot(Y_test.index, Y_test, color='red', label='Actual Sales')
         plt.title(f'Random Forest Sales Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
         plt.xlabel('Date')
         plt.ylabel('Sales')
@@ -119,12 +123,17 @@ class StationarySalesForecaster:
         plt.show()
 
         # Model evaluation
-        r2_rf = r2_score(test_data['sales'], rf_predictions)
+        r2_rf = r2_score(Y_test, rf_predictions)
         print("Random Forest r2_score:", r2_rf)
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, rf_predictions)]
+        print("Day-by-Day MAE Scores:", daily_mae_scores)
     
-    def optimize_date_randomforest(self, max_lag=12, cv_splits=3):
+    def optimize_date_randomforest(self, max_lag=36, cv_splits=15):
         from sklearn.ensemble import RandomForestRegressor
-        from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit
+        from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+
         # Best parameters initialization
         best_mse = float('inf')
         best_lag = 0
@@ -142,8 +151,8 @@ class StationarySalesForecaster:
 
             # Parameter grid for Random Forest
             param_grid = {
-                'n_estimators': [100, 200, 300],
-                'max_depth': [10, 20, 30],
+                'n_estimators': [100, 200, 300, 400, 500],
+                'max_depth': [10, 20, 30, 40, 50],
                 'min_samples_split': [2, 5, 10],
                 'min_samples_leaf': [1, 2, 4]
             }
@@ -170,7 +179,7 @@ class StationarySalesForecaster:
     
     def lightgbm_date_predict(self, lags=12):
         import lightgbm as lgb
-
+        from sklearn.metrics import r2_score, mean_absolute_error
         # Create lag features
         self.create_lag_features(lags)
         specific_segment = self.segmented_data[(self.store_number, self.product_type)]
@@ -185,9 +194,10 @@ class StationarySalesForecaster:
 
         # Initialize and train the LightGBM model
         lgb_model = lgb.LGBMRegressor(n_estimators=100, 
-                                       max_depth=10,
-                                       random_state=42,
-                                       learning_rate=0.1)
+                                    max_depth=10,
+                                    random_state=42,
+                                    learning_rate=0.1
+                                    )
         lgb_model.fit(X_train, Y_train)
 
         # Make predictions
@@ -197,19 +207,23 @@ class StationarySalesForecaster:
         plt.figure(figsize=(12, 6))
         plt.plot(Y_test.index, y_predict, color='blue', label='Predicted Sales')
         plt.plot(Y_test.index, Y_test, color='red', label='Actual Sales')
-        plt.title(f'LightGBM-Puredate Sales Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
+        plt.title(f'LightGBM-PureDate Sales Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
         plt.xlabel('Date')
         plt.ylabel('Sales')
         plt.legend()
         plt.show()
 
-        # Evaluating the model's performance
+        # Evaluating the model's performance   
         r2_date_lgb = r2_score(Y_test, y_predict)
         print("LightGBM r2_score:", r2_date_lgb)
 
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
+        print("Day-by-Day MAE Scores:", daily_mae_scores)
+
     def lightgbm_EXfeature_predict(self):
         import lightgbm as lgb
-    
+        from sklearn.metrics import r2_score, mean_absolute_error
         # Create lag features
         # self.create_lag_features(lags)
         specific_segment = self.segmented_data[(self.store_number, self.product_type)]
@@ -245,10 +259,15 @@ class StationarySalesForecaster:
         # Evaluating the model's performance
         r2_EXfeature_lgb = r2_score(Y_test, y_predict)
         print("LightGBM r2_score:", r2_EXfeature_lgb)
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
+        print("Day-by-Day MAE Scores:", daily_mae_scores)
     
-    def optimize_date_lightgbm(self, max_lag=12, cv_splits=3):
+    def optimize_date_lightgbm(self, max_lag=36, cv_splits=15):
         import lightgbm as lgb
-        from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit
+        from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+
         # Best parameters initialization
         best_mse = float('inf')
         best_lag = 0
@@ -266,8 +285,8 @@ class StationarySalesForecaster:
 
             # Parameter grid for LightGBM
             param_grid = {
-                'n_estimators': [100, 200, 300],
-                'max_depth': [10, 20, 30],
+                'n_estimators': [100, 200, 300, 400, 500],
+                'max_depth': [10, 20, 30, 40, 50],
                 'min_samples_split': [2, 5, 10],
                 'min_samples_leaf': [1, 2, 4]
             }
@@ -293,6 +312,8 @@ class StationarySalesForecaster:
         print(f"Best Parameters: {best_params}")
 
     
+
+
 
 
 
@@ -412,19 +433,5 @@ class NonStationarySalesForecaster:
         pass
 
 
-
-
-
-# class Machine_Learning:
-#     def __init__(self, ):
-
-
-# StationarySalesForecaster(ARIMA, store1, BEAUTY, 5)
-
-# days = 0
-
-
-# for i in non_stationary_result['Store-Product']:
-#     nonStationarySalesForecaster(ARIMA, i, days)
 
 # %%
