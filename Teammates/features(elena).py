@@ -62,7 +62,12 @@ y_train, y_val = y.iloc[:train_size], y.iloc[val_size:]
 
 
 # Initialize the MLPRegressor
-mlp = MLPRegressor(hidden_layer_sizes=(100, ), activation='relu', solver='adam', max_iter=1000)    
+mlp = MLPRegressor(
+                hidden_layer_sizes=(100, ), 
+                activation='relu', 
+                solver='adam', 
+                max_iter=1000
+                )
 
 
 # Train the model
