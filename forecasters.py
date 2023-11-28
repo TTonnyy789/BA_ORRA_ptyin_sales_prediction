@@ -41,24 +41,6 @@ class StationarySalesForecaster:
         # self.n_estimators = n_estimators
         # self.max_depth = max_depth
         self.model = None
-
-    def arima_fit(self):
-        # Retrieve the specific segment of the data
-        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
-
-        # Ensuring the date index is in datetime format
-        specific_segment.index = pd.to_datetime(specific_segment.index)
-        # Splitting the data for training
-        train_data = specific_segment[:self.train_end_date]['sales']
-        validation_data = specific_segment[self.train_end_date:self.validation_end_date]['sales']
-        # Splitting the data for testing 
-        test_data = specific_segment[self.validation_end_date:]['sales']
-
-        # Fit the ARIMA model
-        self.model = ARIMA(train_data, order=self.order)
-        self.model = self.model.fit()
-
-    def arima_predict(self):
         # Retrieve the specific segment of the data
         specific_segment = self.segmented_data[(self.store_number, self.product_type)]
         
@@ -225,8 +207,6 @@ class StationarySalesForecaster:
                                         n_estimators=300, 
                                         max_depth=20, 
                                         random_state=34,
-                                        min_samples_leaf=4,
-                                        min_samples_split=10,
                                         n_jobs=-1
                                         )
         
@@ -287,10 +267,8 @@ class StationarySalesForecaster:
 
             # Parameter grid for LightGBM
             param_grid = {
-                'n_estimators': [100, 200, 300],
+                'n_estimators': [100, 200, 250, 300, 350, 400],
                 'max_depth': [20, 30, 40, 50],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4],
                 'n_jobs': [-1]
                 }
             # Grid Search with cross-validation
@@ -339,8 +317,6 @@ class StationarySalesForecaster:
                                     max_depth=20,
                                     random_state=42,
                                     learning_rate=0.05,
-                                    min_samples_leaf=4,
-                                    min_samples_split=2,
                                     n_jobs=-1
                                     )
         lgb_model.fit(X_train, Y_train)
@@ -420,7 +396,7 @@ class StationarySalesForecaster:
 
         # Define specific lag values to test
         # lag_values = [14]    
-        lag_values = [14, 21, 28, 35, 42, 49]
+        lag_values = [14, 21, 28, 35, 42, 49, 30, 60, 90]
 
         for lag in lag_values:
             self.create_lag_features(lags=lag)
@@ -445,10 +421,8 @@ class StationarySalesForecaster:
 
             # Parameter grid for LightGBM
             param_grid = {
-                'n_estimators': [100, 200, 300],
-                'max_depth': [20, 30, 40, 50],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4],
+                'n_estimators': [100, 200, 250, 300, 350, 400],
+                'max_depth': [20, 30, 40, 50, 60],
                 'learning_rate': [0.01, 0.05, 0.1],
                 'n_jobs': [-1]
             }
@@ -504,6 +478,8 @@ class StationarySalesForecaster:
                                     learning_rate=0.01,
                                     n_jobs=-1
                                     )
+        # 28, 200, 50, 0.01
+        
         xgb_model.fit(X_train, Y_train)
 
         # Make predictions
@@ -527,9 +503,73 @@ class StationarySalesForecaster:
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
         print("Day-by-Day MAE Scores:", daily_mae_scores)
 
-    def optimize_date_xgboost(self, cv_splits=3):
+    def xgboost_date_predict_rolling(self, lags=60, forecast_horizon=16):
         import xgboost as xgb
-        from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
+        from sklearn.metrics import r2_score, mean_absolute_error
+        import numpy as np
+
+        # Create lag features
+        self.create_lag_features(lags)
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)].dropna()
+
+        # Prepare the features and target variable
+        lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        X = specific_segment[lag_columns]
+        Y = specific_segment['sales']
+
+        # Split data into train and forecast sets
+        X_train = X[:-forecast_horizon]
+        Y_train = Y[:-forecast_horizon]
+        X_forecast = X[-forecast_horizon:]
+
+        # Initialize and train the XGBoost model
+        xgb_model = xgb.XGBRegressor(
+                                    n_estimators=250,
+                                    max_depth=40,
+                                    random_state=42,
+                                    learning_rate=0.1,
+                                    n_jobs=-1
+                                    )
+        xgb_model.fit(X_train, Y_train)
+
+        # Rolling forecasting
+        predictions = []
+        for i in range(forecast_horizon):
+            # Forecast the next day
+            next_day_prediction = xgb_model.predict(X_forecast.iloc[[i]].values)
+            predictions.append(next_day_prediction[0])
+
+            # Update lag features for the next prediction, if not the last iteration
+            if i < forecast_horizon - 1:
+                X_forecast.iloc[i+1, -lags:-1] = X_forecast.iloc[i, -(lags-1):]
+
+        # Converting predictions to a NumPy array
+        predictions = np.array(predictions)
+
+        # Get the actual sales values for the forecast period
+        Y_test = Y[-forecast_horizon:]
+
+        # Plotting the forecast alongside the actual test data
+        plt.figure(figsize=(22, 6))
+        plt.plot(Y_test.index, predictions, color='blue', label='Predicted Sales')
+        plt.plot(Y_test.index, Y_test, color='red', label='Actual Sales')
+        plt.title(f'XGBoost Rolling Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
+        plt.xlabel('Date')
+        plt.ylabel('Sales')
+        plt.legend()
+        plt.show()
+
+        # Evaluating the model's performance
+        r2_date_xgb = r2_score(Y_test, predictions)
+        print("XGBoost Rolling r2_score:", r2_date_xgb)
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, predictions)]
+        print("Day-by-Day MAE Scores:", daily_mae_scores)
+
+    def optimize_date_xgboost(self):
+        import xgboost as xgb
+        from sklearn.model_selection import GridSearchCV, TimeSeriesSplit, PredefinedSplit
 
         # Best parameters initialization
         best_mse = float('inf')
@@ -537,7 +577,8 @@ class StationarySalesForecaster:
         best_params = None
 
         # Define specific lag values to test
-        lag_values = [14, 21, 28, 35, 42, 49]
+        # lag_values = [14]    
+        lag_values = [14, 21, 28, 35, 42, 49, 30, 60, 90]
 
         for lag in lag_values:
             self.create_lag_features(lags=lag)
@@ -545,31 +586,42 @@ class StationarySalesForecaster:
             
             # Splitting the data
             train_data = specific_segment[:self.train_end_date]
+            validation_data = specific_segment[self.train_end_date:]
             feature_cols = [col for col in train_data.columns if col != 'sales']
             X_train = train_data[feature_cols]
             y_train = train_data['sales']
+            X_validation = validation_data[feature_cols]
+            y_validation = validation_data['sales']
+
+            # Combine train and validation sets
+            X_combined = pd.concat([X_train, X_validation])
+            y_combined = pd.concat([y_train, y_validation])
+
+            # Define the split index
+            split_index = [-1]*len(X_train) + [0]*len(X_validation)
+            pds = PredefinedSplit(test_fold=split_index)
 
             # Parameter grid for XGBoost
             param_grid = {
-                'n_estimators': [100, 200, 300],
-                'max_depth': [30, 40, 50],
-                'min_samples_split': [2, 5, 10],
-                'min_samples_leaf': [1, 2, 4],
+                'n_estimators': [100, 200, 250, 300, 350, 400],
+                'max_depth': [30, 40, 50, 60],
                 'learning_rate': [0.01, 0.05, 0.1],
                 'n_jobs': [-1]
-            }
-
-            # Time series cross-validator
-            tscv = TimeSeriesSplit(n_splits=cv_splits)
+                }
 
             # Grid Search with cross-validation
             xgb_model = xgb.XGBRegressor(
-                                        random_state=42,
-                                        force_col_wise=True
+                                        random_state=42
                                         )
             
-            grid_search = GridSearchCV(estimator=xgb_model, param_grid=param_grid, cv=tscv, scoring='neg_mean_squared_error', n_jobs=-1)
-            grid_search.fit(X_train, y_train)
+            grid_search = GridSearchCV(
+                                    estimator=xgb_model, 
+                                    param_grid=param_grid, 
+                                    cv=pds, 
+                                    scoring='neg_mean_squared_error', 
+                                    n_jobs=-1
+                                    )
+            grid_search.fit(X_combined, y_combined)
 
             # Evaluate the best model
             best_model_mse = -grid_search.best_score_
@@ -582,6 +634,10 @@ class StationarySalesForecaster:
         print(f"Best MSE: {best_mse}")
         print(f"Best Lag: {best_lag}")
         print(f"Best Parameters: {best_params}")
+
+        # Best MSE: 7022.278828336949
+        # Best Lag: 60
+        # Best Parameters: {'learning_rate': 0.1, 'max_depth': 40, 'n_estimators': 250, 'n_jobs': -1}
 
 
 
