@@ -298,100 +298,12 @@ print(adf_results)
 
 
 #%%#
-### Step 6-3  ####################################################################
-### Statistical Tests for Stationary Time Series Data Confirmation (ADF test) for all store-product combinations
-
-
-# For checking the stationarity of time series data
-# DataFrames to hold different types of results
-adf_results_zero_sales = pd.DataFrame(columns=['Store-Product', 'Sales Sum', 'Special Offer Sum'])
-adf_results_non_stationary_non_zero = pd.DataFrame(columns=['Store-Product', 'ADF Statistic', 'p-value', 'Critical Values', 'Sales Sum', 'Special Offer Sum'])
-adf_results_stationary_non_zero = pd.DataFrame(columns=['Store-Product', 'ADF Statistic', 'p-value', 'Critical Values', 'Sales Sum', 'Special Offer Sum'])
-
-# Dictionaries to hold segments
-zero_sales_segments = {}
-non_stationary_non_zero_segments = {}
-stationary_non_zero_segments = {}
-
-# Iterate through the segments
-for (store, product), data in segmented_data.items():
-    sales_data = data['sales'].dropna()
-    special_offer_sum = data['special_offer'].sum()
-    sales_sum = sales_data.sum()
-    
-    # Check for zero sales
-    if sales_sum == 0:
-        zero_sales_segments[(store, product)] = data
-        new_row = pd.DataFrame([{
-            'Store-Product': f'Store {store} - {product}', 
-            'Sales Sum': sales_sum,
-            'Special Offer Sum': special_offer_sum
-        }])
-        adf_results_zero_sales = pd.concat([adf_results_zero_sales, new_row], ignore_index=True)
-    else:
-        # Non-zero sales, perform ADF test
-        try:
-            adf_result = adfuller(sales_data)
-            store_product = f'Store {store} - {product}'
-            adf_row = pd.DataFrame([{
-                'Store-Product': store_product, 
-                'ADF Statistic': adf_result[0], 
-                'p-value': adf_result[1], 
-                'Critical Values': adf_result[4],
-                'Sales Sum': sales_sum,
-                'Special Offer Sum': special_offer_sum
-            }])
-
-            # Check if the series is stationary
-            if adf_result[1] < 0.05:
-                stationary_non_zero_segments[(store, product)] = data
-                adf_results_stationary_non_zero = pd.concat([adf_results_stationary_non_zero, adf_row], ignore_index=True)
-            else:
-                non_stationary_non_zero_segments[(store, product)] = data
-                adf_results_non_stationary_non_zero = pd.concat([adf_results_non_stationary_non_zero, adf_row], ignore_index=True)
-
-        except Exception as e:
-            print(f"Error performing ADF test on Store {store} - {product}: {str(e)}")
-
-
-# Displaying the ADF results
-print("Zero Sales Segments:")
-print(adf_results_zero_sales)
-print("Non-Stationary Non-Zero Sales Segments:")
-print(adf_results_non_stationary_non_zero)
-print("Stationary Non-Zero Sales Segments:")
-print(adf_results_stationary_non_zero)
-
-
-# Save to CSV if needed
-# adf_results_zero_sales.to_csv("adf_results_zero_sales.csv")
-# adf_results_non_stationary_non_zero.to_csv("adf_results_non_stationary_non_zero.csv")
-# adf_results_stationary_non_zero.to_csv("adf_results_stationary_non_zero.csv")
-
-
-
-##### Important Notification !!! #####
-
-### Even if a time series is non-stationary, it is still a time series and can be analyzed and forecasted; it just means that we may need to transform the data to make it stationary or use models that can handle non-stationarity.
-
-### If there are some segment has been considered non-stationary time series data, we should build other models to forecasting those types of condition
-
-
-##### Conclusion #####
-
-### A time series does not have to pass the ADF test to be considered "a time series." The ADF test simply determines whether or not the data is stationary. Many time series are inherently non-stationary, but they can still be modeled and forecasted after applying the appropriate transformations or by using models designed to handle trends and seasonality, such as ARIMA with differencing or SARIMA (Seasonal ARIMA).
-
-###-------------------------------------------------------------------------------
-
-
-
-#%%#
 ### Step 7-1  ####################################################################
 ### Sales Forecasting - Time series Decomposition Plotting (Take Non-Stationary Time Series Sub-dataset as an example, Store-1 'BOOKS')
 
 ### This is just a simple checking of one of non-zero number of sales and non-stationary subset (Store 1, BOOKS)
 
-
+from forecasters import StationarySalesForecaster, NonStationarySalesForecaster, ZeroSalesForecaster
 
 ### Use store_number = 1, product_type = 'BABY CARE' as our example for the purpose of ensuring the outcome prediction will work successfully for our complete data set
 
@@ -522,107 +434,91 @@ plt.show()
 
 
 
-
 #%%#
 ### Step 7-2  ####################################################################
-### Sales Forecasting - Fit ARIMA Model, including train-test splitting, model training(model fitting), and performance evaluating (For Time Series Sub-dataset)
+### Statistical Tests for Stationary Time Series Data Confirmation (ADF test) for all store-product combinations
 
 
-# Store number and product type for which to forecast sales
-store_number = 1
-product_type = 'BEAUTY'
-# Retrieve the specific segment of the data
-specific_segment = segmented_data[(store_number, product_type)]
+# For checking the stationarity of time series data
+# DataFrames to hold different types of results
+adf_results_zero_sales = pd.DataFrame(columns=['Store-Product', 'Sales Sum', 'Special Offer Sum'])
+adf_results_non_stationary_non_zero = pd.DataFrame(columns=['Store-Product', 'ADF Statistic', 'p-value', 'Critical Values', 'Sales Sum', 'Special Offer Sum'])
+adf_results_stationary_non_zero = pd.DataFrame(columns=['Store-Product', 'ADF Statistic', 'p-value', 'Critical Values', 'Sales Sum', 'Special Offer Sum'])
+
+# Dictionaries to hold segments
+zero_sales_segments = {}
+non_stationary_non_zero_segments = {}
+stationary_non_zero_segments = {}
+
+# Iterate through the segments
+for (store, product), data in segmented_data.items():
+    sales_data = data['sales'].dropna()
+    special_offer_sum = data['special_offer'].sum()
+    sales_sum = sales_data.sum()
+    
+    # Check for zero sales
+    if sales_sum == 0:
+        zero_sales_segments[(store, product)] = data
+        new_row = pd.DataFrame([{
+            'Store-Product': f'Store {store} - {product}', 
+            'Sales Sum': sales_sum,
+            'Special Offer Sum': special_offer_sum
+        }])
+        adf_results_zero_sales = pd.concat([adf_results_zero_sales, new_row], ignore_index=True)
+    else:
+        # Non-zero sales, perform ADF test
+        try:
+            adf_result = adfuller(sales_data)
+            store_product = f'Store {store} - {product}'
+            adf_row = pd.DataFrame([{
+                'Store-Product': store_product, 
+                'ADF Statistic': adf_result[0], 
+                'p-value': adf_result[1], 
+                'Critical Values': adf_result[4],
+                'Sales Sum': sales_sum,
+                'Special Offer Sum': special_offer_sum
+            }])
+
+            # Check if the series is stationary
+            if adf_result[1] < 0.05:
+                stationary_non_zero_segments[(store, product)] = data
+                adf_results_stationary_non_zero = pd.concat([adf_results_stationary_non_zero, adf_row], ignore_index=True)
+            else:
+                non_stationary_non_zero_segments[(store, product)] = data
+                adf_results_non_stationary_non_zero = pd.concat([adf_results_non_stationary_non_zero, adf_row], ignore_index=True)
+
+        except Exception as e:
+            print(f"Error performing ADF test on Store {store} - {product}: {str(e)}")
 
 
-# Ensuring the date index is in datetime format
-specific_segment.index = pd.to_datetime(specific_segment.index)
+# Displaying the ADF results
+print("Zero Sales Segments:")
+print(adf_results_zero_sales)
+print("Non-Stationary Non-Zero Sales Segments:")
+print(adf_results_non_stationary_non_zero)
+print("Stationary Non-Zero Sales Segments:")
+print(adf_results_stationary_non_zero)
 
 
-# Defining the split dates
-train_end_date = '2016-12-31'
-validation_end_date = '2017-07-31'
+# Save to CSV if needed
+# adf_results_zero_sales.to_csv("adf_results_zero_sales.csv")
+# adf_results_non_stationary_non_zero.to_csv("adf_results_non_stationary_non_zero.csv")
+# adf_results_stationary_non_zero.to_csv("adf_results_stationary_non_zero.csv")
 
 
-# Splitting the data again
-train_data = specific_segment[:train_end_date]
-validation_data = specific_segment[train_end_date:validation_end_date]
-test_data = specific_segment[validation_end_date:]
+
+##### Important Notification !!! #####
+
+### Even if a time series is non-stationary, it is still a time series and can be analyzed and forecasted; it just means that we may need to transform the data to make it stationary or use models that can handle non-stationarity.
+
+### If there are some segment has been considered non-stationary time series data, we should build other models to forecasting those types of condition
 
 
-# Displaying the sizes of each set
-print("Training Data Size:", len(train_data))
-print("Validation Data Size:", len(validation_data))
-print("Testing Data Size:", len(test_data))
-print(" ")
-print("------------------------------------------------")
-print(" ")
+##### Conclusion #####
 
-# Displaying the first few rows of the training data
-print(train_data.head(10))
-print(validation_data.head(10))
-print(test_data)
+### A time series does not have to pass the ADF test to be considered "a time series." The ADF test simply determines whether or not the data is stationary. Many time series are inherently non-stationary, but they can still be modeled and forecasted after applying the appropriate transformations or by using models designed to handle trends and seasonality, such as ARIMA with differencing or SARIMA (Seasonal ARIMA).
+
 ###-------------------------------------------------------------------------------
-
-
-
-#%%#
-### Step 7-4  ####################################################################
-### Import the class from forecasters to conduct fitting and forecasting
-
-from forecasters import StationarySalesForecaster, NonStationarySalesForecaster, ZeroSalesForecaster
-
-store1_beauty = StationarySalesForecaster(store_number=1, product_type='BEAUTY')
-store1_beauty.arima_fit()
-store1_beauty.arima_predict()
-
-store1_babycare = NonStationarySalesForecaster(store_number=1, product_type='AUTOMOTIVE')
-store1_babycare.randomforest_fit()
-store1_babycare.randomforest_predict()
-
-
-
-
-
-#%%#
-### Step 7-5  ####################################################################
-### Forecasting Trail on NON-Zero and stationary data
-
-# Retrieve the specific segment based on store number and product type
-specific_segment = segmented_data[(1, 'BEAUTY')]
-
-# Ensure the date index is in datetime format and set it as index
-specific_segment.index = pd.to_datetime(specific_segment.index)
-
-# Split the data into training, validation, and test sets
-train_end_date = '2016-12-31'
-validation_end_date = '2017-07-31'
-train_data = specific_segment[:train_end_date]['sales']
-validation_data = specific_segment[train_end_date:validation_end_date]['sales']
-test_data = specific_segment[validation_end_date:]['sales']
-
-# Fit an ARIMA model to the training data
-model = ARIMA(train_data, order=(8, 2, 6))  # Adjust the order parameters as necessary
-fitted_model = model.fit()
-
-# Forecast using the fitted model
-forecast = fitted_model.forecast(steps=len(test_data))
-
-# Plot the forecast alongside the actual test data
-plt.figure(figsize=(12,6))
-plt.plot(test_data.index, forecast, color='blue', label='Predicted Sales')
-plt.plot(test_data.index, test_data, color='red', label='Actual Sales')
-plt.title('Sales Forecast vs Actuals')
-plt.xlabel('Date')
-plt.ylabel('Sales')
-plt.legend()
-plt.show()
-
-# Evaluate the model's performance
-mse = mean_squared_error(test_data, forecast)
-print('Mean Squared Error:', mse)
-
-
 
 
 
@@ -633,6 +529,5 @@ print('Mean Squared Error:', mse)
 
 
 
-# %%#
 
 
