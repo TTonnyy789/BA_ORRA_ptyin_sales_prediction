@@ -55,15 +55,22 @@ class SalesForecaster:
     def select_and_forecast(self):
         # Get the specific segment data
         specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+        # Calculate the sales range and average sales unit
+        sales_range = specific_segment['sales'].max() - specific_segment['sales'].min()
+        average_sales_unit = specific_segment['sales'].mean()
 
-        # Initialize a dictionary to store models and their MAEs
+        # Initialize variables
         model_mae = {}
+        Y_test = None
 
         # Function to update model_mae dictionary
         def update_model_mae(model_name, prediction_function):
-            y_predict, Y_test, mae = prediction_function()
-            if y_predict is not None and Y_test is not None:
+            nonlocal Y_test
+            y_predict, Y_test_local, mae = prediction_function()
+            if y_predict is not None and Y_test_local is not None:
                 model_mae[model_name] = (mae, y_predict)
+                nonlocal Y_test
+                Y_test = Y_test_local  # Update the Y_test in the outer scope
 
         # Run each model and calculate MAE
         if specific_segment['sales'].sum() == 0:
@@ -78,8 +85,10 @@ class SalesForecaster:
         # Select the model with the lowest MAE
         best_model, best_mae_y_predict = min(model_mae.items(), key=lambda x: x[1][0])
         best_mae, y_predict = best_mae_y_predict
+        Y_test_list = Y_test.tolist() if Y_test is not None else []
 
-        return best_model, best_mae, y_predict
+        # Return the best model, MAE, predictions, sales range, average sales unit, and Y_test
+        return best_model, best_mae, y_predict, sales_range, average_sales_unit, Y_test_list
     
     def zero_sales_predict(self):
         # Determine the length of the test set
@@ -1358,6 +1367,8 @@ class SalesForecaster:
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
         print("Day-by-Day Linear Scores:", daily_mae_scores) 
+        print('------------------------------------------')
+        print('\n')
         return y_predict, Y_test, mae
 
     def randomforest_offer_date_predict(self, lags=14):
@@ -1398,7 +1409,8 @@ class SalesForecaster:
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, rf_predictions)]
         print("Day-by-Day RF Scores:", daily_mae_scores)
-
+        print('------------------------------------------')
+        print('\n')
         return rf_predictions, Y_test, mae
 
     def mlp_regression_offer_date_predict(self, lags=21):
@@ -1444,6 +1456,8 @@ class SalesForecaster:
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
         print("Day-by-Day MAE Scores:", daily_mae_scores) 
+        print('------------------------------------------')
+        print('\n')
         return y_predict, Y_test, mae
 
     def lightgbm_offer_date_predict(self, lags=14):
@@ -1487,6 +1501,8 @@ class SalesForecaster:
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
         print("Day-by-Day LightBGM Scores:", daily_mae_scores)
+        print('------------------------------------------')
+        print('\n')
         return y_predict, Y_test, mae
 
     def xgboost_offer_date_predict(self, lags=28):
@@ -1530,6 +1546,8 @@ class SalesForecaster:
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
         print("Day-by-Day MAE Scores:", daily_mae_scores)
+        print('------------------------------------------')
+        print('\n')
         return y_predict, Y_test, mae
 
 # %%

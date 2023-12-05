@@ -478,26 +478,38 @@ from forecasters import SalesForecaster, ZeroSalesForecaster
 ### Step 7-2  ####################################################################
 ###  Final prediction for all combinations of store and product
 
-results_df = pd.DataFrame(columns=['Store Number', 'Product Type', 'Model', 'MSE', 'Predictions'])
+# Get the first half of keys from your segmented data in order to reduce the computation time(running this on other laptop for the left half of the keys)
+keys = list(SalesForecaster.segmented_data.keys())
+midpoint = len(keys) // 2
+first_half_keys = keys[:midpoint]
 
-for (store_number, product_type) in SalesForecaster.segmented_data.keys():
+# Create a DataFrame to hold the results
+results_df_first_half = pd.DataFrame(columns=['Store_Number', 'Product_Type', 'Model', 'MAE', 'Sales_Range', 'Average_Sales_Unit', 'Predicted_Value', 'Actual_Value'])
+
+
+for (store_number, product_type) in first_half_keys:
     try:
         forecaster = SalesForecaster(store_number=store_number, product_type=product_type)
-        model_used, mse, predictions = forecaster.select_and_forecast()
-
-        results_df = results_df.append({
-            'Store Number': store_number,
-            'Product Type': product_type,
+        # Receive the values from the forecasters.select_and_forecast() method, including the model used, MAE, predictions, sales range, average sales unit, and actual values for the purpose of final result visualization and evaluation
+        model_used, mae, predictions, sales_range, average_sales_unit, Y_test_list = forecaster.select_and_forecast()
+        temp_df = pd.DataFrame([{
+            'Store_Number': store_number,
+            'Product_Type': product_type,
             'Model': model_used,
-            'MSE': mse,
-            'Predictions': predictions  # Consider storing summaries if predictions are large
-        }, ignore_index=True)
+            'MAE': mae,
+            'Sales_Range': sales_range,
+            'Average_Sales_Unit': average_sales_unit,
+            'Predicted_Value': predictions,
+            'Actual_Value':Y_test_list
+        }])
+        results_df_first_half = pd.concat([results_df_first_half, temp_df], ignore_index=True)
+
     except Exception as e:
         print(f"Error processing store {store_number}, product {product_type}: {e}")
 
-
-# results_df.to_csv('forecasting_results.csv', index=False)
-
+# Print the first few rows of the DataFrame
+print(results_df_first_half.head())
+results_df_first_half.to_csv("results_first_half.csv")
 
 
 ##### Conclusion #####
@@ -510,8 +522,38 @@ for (store_number, product_type) in SalesForecaster.segmented_data.keys():
 ### Step 7-3  ####################################################################
 ### Result visualization and evaluation
 
+# Load the data from CSV files
+results_df_first_half = pd.read_csv("results_first_half.csv")
+results_df_second_half = pd.read_csv("results_second_half.csv")
+
+# Concatenate the two dataframes
+results_df = pd.concat([results_df_first_half, results_df_second_half], ignore_index=True)
+
+# results_df = pd.concat([results_df_first_half, results_df_second_half], ignore_index=True)
 
 
+# Display summary statistics
+print("Summary Statistics:\n", results_df.describe())
+
+# Check the distribution of MSE
+plt.figure(figsize=(10, 6))
+sns.histplot(results_df['MSE'], kde=True)
+plt.title('Distribution of Mean Squared Error (MSE)')
+plt.xlabel('MSE')
+plt.ylabel('Frequency')
+plt.show()
+
+
+# Group the results by the model used and calculate average MSE for each model
+average_mse_per_model = results_df.groupby('Model')['MSE'].mean()
+print("Average MSE per Model:\n", average_mse_per_model)
+
+# Bar plot of average MSE per model
+average_mse_per_model.plot(kind='bar', figsize=(10, 6))
+plt.title('Average MSE per Model')
+plt.xlabel('Model')
+plt.ylabel('Average MSE')
+plt.show()
 
 
 
