@@ -3,15 +3,11 @@
 ### Import essential library and load the data
 
 # Import pandas, numpy, and etc.
-import openpyxl 
 import numpy as np
 import pandas as pd
 import seaborn as sns
 from pmdarima import auto_arima
 import matplotlib.pyplot as plt
-from statsmodels.tsa.stattools import adfuller
-from statsmodels.tsa.seasonal import seasonal_decompose
-from statsmodels.tsa.arima.model import ARIMA
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 
@@ -20,7 +16,7 @@ from sklearn.metrics import mean_squared_error
 product = pd.read_csv("/Users/ttonny0326/GitHub_Project/BA_ORRA_python_Grocery_prediction/Products_Information.csv")
 
 
-# Using info() and head() functions to briefly read the overall structure
+# Using info() and head() functions to briefly observe the overall pattern of the data
 product_info = product.info()
 product_describe = product.describe()
 product_rows = product.head()
@@ -284,15 +280,13 @@ plt.show()
 
 ### Conclusion ###
 
-### We can see that the sales data for store 1 and its 'BABY CARE' product consists of zero sales during the whole period of time,
-### and the sales data for store 1 and its 'BEVERAGES' product consists of non-zero sales during the whole period of time.
+### We can see that the sales data for store 1-'BABY CARE' product consists of zero sales during the whole period of time, and the sales data for store 1-'BEVERAGES' product consists of non-zero sales during the whole period of time.
 
 ### Therefore, we can segment the data into zero sales, non-zero sales. However, we need to consider the sales data for store 1 and its 'BOOKS' product, which consists of both zero sales and non-zero sales during the whole period of time.
 
-### Therefore, we need to segment the data into zero sales, non-zero sales, and mixed sales.
+### Therefore, in further steps(in the forecaster class), we will build a function to filter out the first appear zero value if specific combination actually shows initial zero sales unit but at the end of the period, it shows non-zero sales unit.
 
 ###-------------------------------------------------------------------------------
-
 
 
 #%%#
@@ -323,10 +317,13 @@ def divide_segments(segmented_data):
         store, product_type = key
         segment = segment[:"2017-07-30"]  # Filter data up to 2017-07-30
 
+        # Check if there are any sales at all in the segment
         if segment['sales'].sum() == 0:
             zero_sales_segments.append(segment.assign(store=store, product=product_type))
         else:
-            non_zero_sales_segments.append(segment.assign(store=store, product=product_type))
+            # Filter out individual records where sales are zero
+            non_zero_segment = segment[segment['sales'] > 0]
+            non_zero_sales_segments.append(non_zero_segment.assign(store=store, product=product_type))
 
     return pd.concat(zero_sales_segments).reset_index(), pd.concat(non_zero_sales_segments).reset_index()
 
@@ -347,13 +344,118 @@ if __name__ == "__main__":
     print(non_zero_sales_segments.tail())
 
 
-# Save processed data
+# Save processed data for zero sales and non-zero sales
+
 # zero_sales_segments.to_csv("zero_sales_segments.csv")
 # non_zero_sales_segments.to_csv("non_zero_sales_segments.csv")
 
 ###-------------------------------------------------------------------------------
 
 
+
+#%%#
+### Step 6-3  ####################################################################
+### After filtered the data into zero and non-zero sales unit, create a heatmap to visualize the average sales for each store-product combination, and try to segment the data into different groups based on the heatmap for the purpose of model selection in non-zero group.
+
+### Plot the distribution of average sales for each store-product combination and the distribution of average sales range for each store-product combination to define the threshold for each group.
+
+# Load the data
+non_product = pd.read_csv("/Users/ttonny0326/GitHub_Project/BA_ORRA_python_Grocery_prediction/non_zero_sales_segments.csv")
+
+# Ensure 'product_type' is of categorical data type
+non_product['product_type'] = non_product['product_type'].astype('category')
+
+# Initialize a dictionary to hold the data for each product-store combination
+segmented_data = {}
+
+# Grouping the data by store and product, and storing each group in the dictionary
+for (store, product_type), group in non_product.groupby(['store_nbr', 'product_type'], observed=True):
+    segmented_data[(store, product_type)] = group[['sales', 'special_offer', 'id']]
+
+
+
+# Splitting stores into three groups
+group1_stores = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] 
+group2_stores = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+group3_stores = [21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+group4_stores = [31, 32, 33, 34, 35, 36, 37, 38, 39, 40]
+group5_stores = [50, 51, 52, 53]
+
+# Creating DataFrames for heatmaps
+heatmap_data_group1 = pd.DataFrame()
+heatmap_data_group2 = pd.DataFrame()
+heatmap_data_group3 = pd.DataFrame()
+heatmap_data_group4 = pd.DataFrame()
+heatmap_data_group5 = pd.DataFrame()
+
+# Populate the DataFrames with average sales
+for (store, product_type), data in segmented_data.items():
+    avg_sales = data['sales'].mean()  # Assuming 'sales' is your metric of interest
+    if store in group1_stores:
+        heatmap_data_group1.loc[store, product_type] = avg_sales
+    elif store in group2_stores:
+        heatmap_data_group2.loc[store, product_type] = avg_sales
+    elif store in group3_stores:
+        heatmap_data_group3.loc[store, product_type] = avg_sales
+    elif store in group4_stores:
+        heatmap_data_group4.loc[store, product_type] = avg_sales
+    elif store in group5_stores:
+        heatmap_data_group5.loc[store, product_type] = avg_sales
+
+# Fill NaN values if any
+heatmap_data_group1.fillna(0, inplace=True)
+heatmap_data_group2.fillna(0, inplace=True)
+heatmap_data_group3.fillna(0, inplace=True)
+heatmap_data_group4.fillna(0, inplace=True)
+heatmap_data_group5.fillna(0, inplace=True)
+
+
+# Function to create heatmap
+def create_heatmap(data, title, fig_size=(42, 8), cmap='Blues'):
+    plt.figure(figsize=fig_size)
+    sns.heatmap(data, annot=True, cmap=cmap)
+    plt.title(title)
+    plt.xlabel('Product Type')
+    plt.ylabel('Store Number')
+    plt.show()
+
+# Creating heatmaps for each store group using already populated DataFrames
+group_heatmap_data = [heatmap_data_group1, heatmap_data_group2, heatmap_data_group3, heatmap_data_group4, heatmap_data_group5]
+for i, heatmap_data in enumerate(group_heatmap_data):
+    create_heatmap(heatmap_data, f'Heatmap of Average Sales for Group {i+1}')
+
+# Distribution of average sales for each store-product combination
+avg_sales_data = [data['sales'].mean() for (_, data) in segmented_data.items()]
+plt.figure(figsize=(12, 6))
+sns.histplot(avg_sales_data, bins=30, kde=True)
+plt.xlim(0, 2500)  # Adjust as per your data
+plt.title('Distribution of Average Sales Units Across All Combinations')
+plt.xlabel('Average Sales Units')
+plt.ylabel('Frequency')
+plt.show()
+
+# Distribution of average sales range for each store-product combination
+sales_ranges = [data['sales'].max() - data['sales'].min() for (_, data) in segmented_data.items()]
+plt.figure(figsize=(12, 6))
+sns.histplot(sales_ranges, bins=30, kde=True)
+plt.xlim(0, 25000)  # Adjust as per your data
+plt.title('Distribution of Sales Unit Ranges Across All Combinations')
+plt.xlabel('Range of Sales Units')
+plt.ylabel('Frequency')
+plt.show()
+
+###-------------------------------------------------------------------------------
+
+
+
+
+#%%#
+### Step 6-3  ####################################################################
+### By observing the distribution of the sales unit range for each store-product combination, we can segment the data into different groups based on the quantile of the sales unit range.
+
+# 
+
+### 
 
 #%%#
 ### Step 7-1  ####################################################################
@@ -374,7 +476,28 @@ from forecasters import SalesForecaster, ZeroSalesForecaster
 
 #%%#
 ### Step 7-2  ####################################################################
-### 
+###  Final prediction for all combinations of store and product
+
+results_df = pd.DataFrame(columns=['Store Number', 'Product Type', 'Model', 'MSE', 'Predictions'])
+
+for (store_number, product_type) in SalesForecaster.segmented_data.keys():
+    try:
+        forecaster = SalesForecaster(store_number=store_number, product_type=product_type)
+        model_used, mse, predictions = forecaster.select_and_forecast()
+
+        results_df = results_df.append({
+            'Store Number': store_number,
+            'Product Type': product_type,
+            'Model': model_used,
+            'MSE': mse,
+            'Predictions': predictions  # Consider storing summaries if predictions are large
+        }, ignore_index=True)
+    except Exception as e:
+        print(f"Error processing store {store_number}, product {product_type}: {e}")
+
+
+# results_df.to_csv('forecasting_results.csv', index=False)
+
 
 
 ##### Conclusion #####
@@ -385,7 +508,8 @@ from forecasters import SalesForecaster, ZeroSalesForecaster
 
 #%%#
 ### Step 7-3  ####################################################################
-### 
+### Result visualization and evaluation
+
 
 
 

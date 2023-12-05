@@ -2,19 +2,19 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-# from statsmodels.tsa.arima.model import ARIMA
 import lightgbm as lgb
 import xgboost as xgb
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV, TimeSeriesSplit
 from sklearn.metrics import mean_squared_error
-from sklearn.metrics import accuracy_score, mean_squared_error, confusion_matrix, precision_score, recall_score, ConfusionMatrixDisplay, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 # For the purpose of segment the data by store and product type and make sure each individual segment has no initial zero sales units if possible. However, if certain combination of store and product type has no sales units at all, then the segment will be dropped.
 
-# Function to process each segment and filter out initial zero sales
+# Function to process non-zero segment and filter out initial zero sales till they start with the first non-zero sales
 def process_segment(group):
-    # Filter out initial zero sales
     first_non_zero_index = group['sales'].ne(0).idxmax()
     return group.loc[first_non_zero_index:]
 
@@ -29,9 +29,9 @@ class SalesForecaster:
     # Convert the 'date' column to datetime format and set it as the index
     product['date'] = pd.to_datetime(product['date'])
     product.set_index('date', inplace=True)
-    # Ensure 'product_type' is of categorical data type
+    # Ensure 'product_type' is of categorical
     product['product_type'] = product['product_type'].astype('category')
-    # Initialize a dictionary for the store-product grouping segmentation
+    # Create a dictionary for storing the store-product data sets
     segmented_data = {}
 
     # Function to process each segment if the data starts with zero sales units
@@ -51,6 +51,59 @@ class SalesForecaster:
         self.train_end_date = train_end_date
         self.validation_end_date = validation_end_date
         self.model = None
+
+    def select_and_forecast(self):
+        # Get the specific segment data
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+
+        # Initialize a dictionary to store models and their MAEs
+        model_mae = {}
+
+        # Function to update model_mae dictionary
+        def update_model_mae(model_name, prediction_function):
+            y_predict, Y_test, mae = prediction_function()
+            if y_predict is not None and Y_test is not None:
+                model_mae[model_name] = (mae, y_predict)
+
+        # Run each model and calculate MAE
+        if specific_segment['sales'].sum() == 0:
+            update_model_mae('Zero Sales Prediction', self.zero_sales_predict)
+        else:
+            update_model_mae('Linear Regression', self.linear_offer_date_predict)
+            update_model_mae('Random Forest', self.randomforest_offer_date_predict)
+            update_model_mae('LightGBM', self.lightgbm_offer_date_predict)
+            update_model_mae('XGBoost', self.xgboost_offer_date_predict)
+            update_model_mae('MLP Regression', self.mlp_regression_offer_date_predict)
+
+        # Select the model with the lowest MAE
+        best_model, best_mae_y_predict = min(model_mae.items(), key=lambda x: x[1][0])
+        best_mae, y_predict = best_mae_y_predict
+
+        return best_model, best_mae, y_predict
+    
+    def zero_sales_predict(self):
+        # Determine the length of the test set
+        test_set_length = len(self.segmented_data[(self.store_number, self.product_type)][self.validation_end_date:])
+
+        # Predictions are zeros
+        predictions = [0] * test_set_length
+
+        # There are no actuals, so MSE will be zero
+        mse = 0
+
+        # Plotting the forecast alongside an empty plot (no actuals for zero sales)
+        if test_set_length > 0:
+            # Only create a plot if there are samples in the test set
+            dates = pd.date_range(start=self.validation_end_date, periods=test_set_length, freq='D')
+            plt.figure(figsize=(22, 6))
+            plt.plot(dates, predictions, color='green', label='Predicted Sales')
+            plt.title(f'Zero Sales Prediction for Store {self.store_number} - Product {self.product_type}')
+            plt.xlabel('Date')
+            plt.ylabel('Sales')
+            plt.legend()
+            plt.show()
+
+        return predictions, None, mse
 
     def create_sales_lag_features(self, lags=12):
         # using the self.segmented_data to create the lag features for the sales column
@@ -196,7 +249,7 @@ class SalesForecaster:
         print(f"Best Lag: {best_lag}")
         print(f"Best Parameters: {best_params}")
 
-    def linear_offer_date_predict(self, lags=28):
+    def linear_offer_date_plotting_predict(self, lags=28):
         from sklearn.linear_model import LinearRegression
         from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
         import matplotlib.pyplot as plt
@@ -223,7 +276,7 @@ class SalesForecaster:
 
         # Initialize and train the Linear Regression model
         self.model = LinearRegression(
-                                    n_jobs=-1,
+                                    n_jobs=-1
         )
         self.model.fit(X_train, Y_train)
 
@@ -233,7 +286,7 @@ class SalesForecaster:
         # Plotting the forecast alongside the actual test data
         dates = pd.to_datetime(Y_test.index)
         plt.figure(figsize=(22, 6))
-        plt.plot(dates, y_predict, color='blue', label='Predicted Sales')
+        plt.plot(dates, y_predict, color='green', label='Predicted Sales')
         plt.plot(dates, Y_test, color='red', label='Actual Sales')
         plt.title(f'Linear Regression Sales Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
         plt.xlabel('Date')
@@ -241,13 +294,16 @@ class SalesForecaster:
         plt.legend()
         plt.show()
 
-        # Evaluating the model's performance
-        print("Linear Regression MSE:", mean_squared_error(Y_test, y_predict))
+        mae = mean_absolute_error(Y_test, y_predict)
+        # Evaluating the model's performance overall MSE, R2, and MAE
+        print("Linear Regression daily MAE:", mean_absolute_error(Y_test, y_predict))
+        print("Linear Regression daily MSE:", mean_squared_error(Y_test, y_predict))
         print("Linear Regression R2 Score:", r2_score(Y_test, y_predict))
 
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
-        print("Day-by-Day MAE Scores:", daily_mae_scores)
+        print("Day-by-Day Linear Scores:", daily_mae_scores) 
+        return y_predict, Y_test, mae
 
     def optimize_offer_date_linear_regression(self, n_splits=5):
         from sklearn.linear_model import LinearRegression
@@ -305,13 +361,13 @@ class SalesForecaster:
         print(f"Best MSE: {best_mse}")
         print(f"Best Lag: {best_lag}")
         print(f"Best Parameters: {best_params}")
+        ### fine tuned by store1-EGGS, sales scale is 60-140
 
-    def mlp_regression_offer_date_predict(self, lags=60):
+    def mlp_regression_offer_date_plotting_predict(self, lags=21):
         from sklearn.neural_network import MLPRegressor
         from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
         import matplotlib.pyplot as plt
-        import numpy as np
-
+        
         # Create lag features for both sales and special_offer
         self.create_sales_lag_features(lags)
         self.create_offer_lag_features(lags)
@@ -333,8 +389,9 @@ class SalesForecaster:
 
         # Initialize and train the MLP Regressor model
         self.model = MLPRegressor(
-                                hidden_layer_sizes=(200, 200, 100), 
-                                max_iter=1000, 
+                                hidden_layer_sizes=(200, 200, 200, 200, 100), 
+                                max_iter=500, 
+                                learning_rate='adaptive',
                                 random_state=42
                                 )
         self.model.fit(X_train, Y_train)
@@ -345,7 +402,7 @@ class SalesForecaster:
         # Plotting the forecast alongside the actual test data
         dates = pd.to_datetime(Y_test.index)
         plt.figure(figsize=(22, 6))
-        plt.plot(dates, y_predict, color='blue', label='Predicted Sales')
+        plt.plot(dates, y_predict, color='green', label='Predicted Sales')
         plt.plot(dates, Y_test, color='red', label='Actual Sales')
         plt.title(f'MLP Regression Sales Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
         plt.xlabel('Date')
@@ -353,13 +410,16 @@ class SalesForecaster:
         plt.legend()
         plt.show()
 
-        # Evaluating the model's performance
-        print("MLP Regression MSE:", mean_squared_error(Y_test, y_predict))
+        mae = mean_absolute_error(Y_test, y_predict)
+        # Evaluating the model's performance overall MSE, R2, and MAE
+        print("MLP Regression daily MAE:", mean_absolute_error(Y_test, y_predict))
+        print("MLP Regression daily MSE:", mean_squared_error(Y_test, y_predict))
         print("MLP Regression R2 Score:", r2_score(Y_test, y_predict))
 
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
-        print("Day-by-Day MAE Scores:", daily_mae_scores)
+        print("Day-by-Day MAE Scores:", daily_mae_scores) 
+        return y_predict, Y_test, mae
 
     def optimize_offer_date_mlp_regression(self):
         from sklearn.neural_network import MLPRegressor
@@ -398,12 +458,14 @@ class SalesForecaster:
 
             # Parameter grid for MLP Regression
             param_grid = {
-                'hidden_layer_sizes': [(200, 200, 100), (200, 200, 200, 100), (200, 200, 200, 200, 100)]
+                'hidden_layer_sizes': [(200, 200, 100), (200, 200, 200, 100), (200, 200, 200, 200, 100)],
+                'learning_rate': ['adaptive', 'constant', 'invscaling'],
                 }
 
             # Grid Search with predefined split
             mlp = MLPRegressor(
-                                max_iter=1000, 
+                                max_iter=500,
+                                early_stopping=True,
                                 random_state=42
                                 )
             grid_search = GridSearchCV(
@@ -427,24 +489,27 @@ class SalesForecaster:
         print(f"Best MSE: {best_mse}")
         print(f"Best Lag: {best_lag}")
         print(f"Best Parameters: {best_params}")
+        ### fine tuned by store4-DAIRY, sales scale is 500-1100
 
     def randomforest_date_predict(self, lags=14):
-        from sklearn.ensemble import RandomForestRegressor
-        from sklearn.metrics import r2_score, mean_absolute_error
-
-        self.create_sales_lag_features(lags=lags)
+        # Create lag features for both sales and special_offer
+        self.create_sales_lag_features(lags)
+        self.create_offer_lag_features(lags)
         specific_segment = self.segmented_data[(self.store_number, self.product_type)]
         specific_segment.dropna(inplace=True)  # Drop rows with NaNs
 
         # Prepare the features and target variable
-        lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
-        X_train = specific_segment[:self.validation_end_date][lag_columns].values
+        sales_lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        offer_lag_columns = [f'offer_lag_{i}' for i in range(1, lags + 1)]
+        all_features = sales_lag_columns + offer_lag_columns
+
+        X_train = specific_segment[:self.validation_end_date][all_features].values
         Y_train = specific_segment[:self.validation_end_date]['sales']
         
-        X_test = specific_segment[self.validation_end_date:][lag_columns].values
+        X_test = specific_segment[self.validation_end_date:][all_features].values
         Y_test = specific_segment[self.validation_end_date:]['sales']
 
-        # Train Random Forest model
+        # Train the Random Forest model
         self.model = RandomForestRegressor(
                                         n_estimators=300, 
                                         max_depth=20, 
@@ -455,10 +520,10 @@ class SalesForecaster:
         self.model.fit(X_train, Y_train)
         rf_predictions = self.model.predict(X_test)
 
-        # Plotting
+        # Plotting the forecast alongside the actual test data
         dates = pd.to_datetime(Y_test.index)
         plt.figure(figsize=(22,6))
-        plt.plot(dates, rf_predictions, color='green', label='RF Predicted Sales')
+        plt.plot(dates, rf_predictions, color='blue', label='RF Predicted Sales')
         plt.plot(dates, Y_test, color='red', label='Actual Sales')
         plt.title(f'Random Forest Sales Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
         plt.xlabel('Date')
@@ -466,14 +531,70 @@ class SalesForecaster:
         plt.legend()
         plt.show()
 
-        # Model evaluation
-        r2_rf = r2_score(Y_test, rf_predictions)
-        print("Random Forest r2_score:", r2_rf)
+        mae = mean_absolute_error(Y_test, rf_predictions)
+        # Evaluating the model's performance: MSE, R2, and MAE
+        print("Random Forest MAE:", mean_absolute_error(Y_test, rf_predictions))
+        print("Random Forest MSE:", mean_squared_error(Y_test, rf_predictions))
+        print("Random Forest R2 Score:", r2_score(Y_test, rf_predictions))
 
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, rf_predictions)]
-        print("Day-by-Day MAE Scores:", daily_mae_scores)
+        print("Day-by-Day RF Scores:", daily_mae_scores)
+
+        return rf_predictions, Y_test, mae
     
+    def randomforest_offer_date_plotting_predict(self, lags=14):
+        # Create lag features for both sales and special_offer
+        self.create_sales_lag_features(lags)
+        self.create_offer_lag_features(lags)
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+        specific_segment.dropna(inplace=True)  # Drop rows with NaNs
+
+        # Prepare the features and target variable
+        sales_lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        offer_lag_columns = [f'offer_lag_{i}' for i in range(1, lags + 1)]
+        all_features = sales_lag_columns + offer_lag_columns
+
+        X_train = specific_segment[:self.validation_end_date][all_features].values
+        Y_train = specific_segment[:self.validation_end_date]['sales']
+        
+        X_test = specific_segment[self.validation_end_date:][all_features].values
+        Y_test = specific_segment[self.validation_end_date:]['sales']
+
+        # Train the Random Forest model
+        self.model = RandomForestRegressor(
+                                        n_estimators=300, 
+                                        max_depth=20, 
+                                        random_state=34,
+                                        n_jobs=-1
+                                        )
+        
+        self.model.fit(X_train, Y_train)
+        rf_predictions = self.model.predict(X_test)
+
+        # Plotting the forecast alongside the actual test data
+        dates = pd.to_datetime(Y_test.index)
+        plt.figure(figsize=(22,6))
+        plt.plot(dates, rf_predictions, color='blue', label='RF Predicted Sales')
+        plt.plot(dates, Y_test, color='red', label='Actual Sales')
+        plt.title(f'Random Forest Sales Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
+        plt.xlabel('Date')
+        plt.ylabel('Sales')
+        plt.legend()
+        plt.show()
+
+        mae = mean_absolute_error(Y_test, rf_predictions)
+        # Evaluating the model's performance: MSE, R2, and MAE
+        print("Random Forest MAE:", mean_absolute_error(Y_test, rf_predictions))
+        print("Random Forest MSE:", mean_squared_error(Y_test, rf_predictions))
+        print("Random Forest R2 Score:", r2_score(Y_test, rf_predictions))
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, rf_predictions)]
+        print("Day-by-Day RF Scores:", daily_mae_scores)
+
+        return rf_predictions, Y_test, mae
+
     def optimize_date_randomforest(self):
         from sklearn.ensemble import RandomForestRegressor
         from sklearn.model_selection import GridSearchCV, PredefinedSplit
@@ -587,7 +708,7 @@ class SalesForecaster:
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
         print("Day-by-Day MAE Scores:", daily_mae_scores)
 
-    def lightgbm_offer_date_predict(self, lags=14):
+    def lightgbm_offer_date_plotting_predict(self, lags=14):
         import lightgbm as lgb
         from sklearn.metrics import r2_score, mean_absolute_error
         import matplotlib.pyplot as plt
@@ -624,7 +745,7 @@ class SalesForecaster:
         # Plotting the forecast alongside the actual test data
         dates = pd.to_datetime(Y_test.index)
         plt.figure(figsize=(22, 6))
-        plt.plot(dates, y_predict, color='blue', label='Predicted Sales')
+        plt.plot(dates, y_predict, color='green', label='Predicted Sales')
         plt.plot(dates, Y_test, color='red', label='Actual Sales')
         plt.title(f'LightGBM-PureDate Sales Forecast vs Actuals for Store {self.store_number} - Product {self.product_type}')
         plt.xlabel('Date')
@@ -632,13 +753,16 @@ class SalesForecaster:
         plt.legend()
         plt.show()
 
-        # Evaluating the model's performance   
-        r2_date_lgb = r2_score(Y_test, y_predict)
-        print("LightGBM r2_score:", r2_date_lgb)
+        mae = mean_absolute_error(Y_test, y_predict)
+        # Evaluating the model's performance overall MSE, R2, and MAE
+        print("LightBGM MAE:", mean_absolute_error(Y_test, y_predict))
+        print("LightBGM MSE:", mean_squared_error(Y_test, y_predict))
+        print("LightBGM R2 Score:", r2_score(Y_test, y_predict))
 
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
-        print("Day-by-Day MAE Scores:", daily_mae_scores)
+        print("Day-by-Day LightBGM Scores:", daily_mae_scores)
+        return y_predict, Y_test, mae
 
     def lightgbm_date_predict_rolling(self, lags=14, forecast_horizon=16):
         import lightgbm as lgb
@@ -850,16 +974,18 @@ class SalesForecaster:
             param_grid = {
                 'n_estimators': [100, 200, 250, 300, 350, 400],
                 'max_depth': [20, 30, 40, 50, 60],
-                'learning_rate': [0.01, 0.05, 0.1],
-                'n_jobs': [-1]
+                'learning_rate': [0.01, 0.05, 0.1]
             }
 
             # Time Series Cross-Validator
-            tscv = TimeSeriesSplit(n_splits=n_splits)
+            tscv = TimeSeriesSplit(
+                                n_splits=n_splits
+                                )
 
             # Grid Search with time series cross-validation
             lgb_model = lgb.LGBMRegressor(
                                         random_state=42, 
+                                        n_jobs=-1,
                                         force_col_wise=True
                                         )
             
@@ -882,6 +1008,7 @@ class SalesForecaster:
         print(f"Best MSE: {best_mse}")
         print(f"Best Lag: {best_lag}")
         print(f"Best Parameters: {best_params}")
+        ### fine tuned by store3-POILTRY, sales scale is 800-1600
 
     def xgboost_date_predict(self, lags=28):
         import xgboost as xgb
@@ -932,7 +1059,7 @@ class SalesForecaster:
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
         print("Day-by-Day MAE Scores:", daily_mae_scores)
 
-    def xgboost_offer_date_predict(self, lags=28):
+    def xgboost_offer_date_plotting_predict(self, lags=28):
         import xgboost as xgb
         from sklearn.metrics import r2_score, mean_absolute_error
         import matplotlib.pyplot as plt
@@ -977,13 +1104,16 @@ class SalesForecaster:
         plt.legend()
         plt.show()
 
-        # Evaluating the model's performance   
-        r2_date_xgb = r2_score(Y_test, y_predict)
-        print("XGBoost_Date&Offer r2_score:", r2_date_xgb)
+        mae = mean_absolute_error(Y_test, y_predict)
+        # Evaluating the model's performance overall MSE, R2, and MAE
+        print("XGBoost_Date&Offer MAE:", mean_absolute_error(Y_test, y_predict))
+        print("XGBoost_Date&Offer MSE:", mean_squared_error(Y_test, y_predict))
+        print("XGBoost_Date&Offer R2 Score:", r2_score(Y_test, y_predict))
 
         # Day-by-day evaluation using MAE
         daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
         print("Day-by-Day MAE Scores:", daily_mae_scores)
+        return y_predict, Y_test, mae
 
     def xgboost_date_predict_rolling(self, lags=28, forecast_horizon=16):
         import xgboost as xgb
@@ -1156,19 +1286,21 @@ class SalesForecaster:
             }
 
             # Time Series Cross-Validator
-            tscv = TimeSeriesSplit(n_splits=n_splits)
+            tscv = TimeSeriesSplit(
+                                n_splits=n_splits
+                                )
 
             # Grid Search with time series cross-validation
             xgb_model = xgb.XGBRegressor(
-                                        random_state=42
+                                        random_state=42,
+                                        n_jobs=-1
                                         )
             
             grid_search = GridSearchCV(
                                     estimator=xgb_model, 
                                     param_grid=param_grid, 
                                     cv=tscv, 
-                                    scoring='neg_mean_squared_error', 
-                                    n_jobs=-1
+                                    scoring='neg_mean_squared_error'
                                     )
             grid_search.fit(X, y)
 
@@ -1183,9 +1315,221 @@ class SalesForecaster:
         print(f"Best MSE: {best_mse}")
         print(f"Best Lag: {best_lag}")
         print(f"Best Parameters: {best_params}")
+        ### fine tuned by store18-DAIRY sales scale is 400-900 
 
-    # def scale_segmentation(self):
+    def linear_offer_date_predict(self, lags=28):
+        from sklearn.linear_model import LinearRegression
+        from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+        import numpy as np
+        # Create lag features for both sales and special_offer
+        self.create_sales_lag_features(lags)
+        self.create_offer_lag_features(lags)
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+
+        # Prepare the features and target variable
+        sales_lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        offer_lag_columns = [f'offer_lag_{i}' for i in range(1, lags + 1)]
+        all_features = sales_lag_columns + offer_lag_columns
+
+        # Fill NaN values with zeros in the lag features
+        specific_segment[all_features] = specific_segment[all_features].fillna(0)
+
+        X_train = specific_segment[:self.validation_end_date][all_features].values
+        Y_train = specific_segment[:self.validation_end_date]['sales']
         
+        X_test = specific_segment[self.validation_end_date:][all_features].values
+        Y_test = specific_segment[self.validation_end_date:]['sales']
 
+        # Initialize and train the Linear Regression model
+        self.model = LinearRegression(
+                                    n_jobs=-1
+        )
+        self.model.fit(X_train, Y_train)
+
+        # Make predictions
+        y_predict = self.model.predict(X_test)
+
+        mae = mean_absolute_error(Y_test, y_predict)
+        # Evaluating the model's performance overall MSE, R2, and MAE
+        print("Linear Regression daily MAE:", mean_absolute_error(Y_test, y_predict))
+        print("Linear Regression daily MSE:", mean_squared_error(Y_test, y_predict))
+        print("Linear Regression R2 Score:", r2_score(Y_test, y_predict))
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
+        print("Day-by-Day Linear Scores:", daily_mae_scores) 
+        return y_predict, Y_test, mae
+
+    def randomforest_offer_date_predict(self, lags=14):
+        # Create lag features for both sales and special_offer
+        self.create_sales_lag_features(lags)
+        self.create_offer_lag_features(lags)
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+        specific_segment.dropna(inplace=True)  # Drop rows with NaNs
+
+        # Prepare the features and target variable
+        sales_lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        offer_lag_columns = [f'offer_lag_{i}' for i in range(1, lags + 1)]
+        all_features = sales_lag_columns + offer_lag_columns
+
+        X_train = specific_segment[:self.validation_end_date][all_features].values
+        Y_train = specific_segment[:self.validation_end_date]['sales']
+        
+        X_test = specific_segment[self.validation_end_date:][all_features].values
+        Y_test = specific_segment[self.validation_end_date:]['sales']
+
+        # Train the Random Forest model
+        self.model = RandomForestRegressor(
+                                        n_estimators=300, 
+                                        max_depth=20, 
+                                        random_state=34,
+                                        n_jobs=-1
+                                        )
+        
+        self.model.fit(X_train, Y_train)
+        rf_predictions = self.model.predict(X_test)
+
+        mae = mean_absolute_error(Y_test, rf_predictions)
+        # Evaluating the model's performance: MSE, R2, and MAE
+        print("Random Forest MAE:", mean_absolute_error(Y_test, rf_predictions))
+        print("Random Forest MSE:", mean_squared_error(Y_test, rf_predictions))
+        print("Random Forest R2 Score:", r2_score(Y_test, rf_predictions))
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, rf_predictions)]
+        print("Day-by-Day RF Scores:", daily_mae_scores)
+
+        return rf_predictions, Y_test, mae
+
+    def mlp_regression_offer_date_predict(self, lags=21):
+        from sklearn.neural_network import MLPRegressor
+        from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+        # Create lag features for both sales and special_offer
+        self.create_sales_lag_features(lags)
+        self.create_offer_lag_features(lags)
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+
+        # Prepare the features and target variable
+        sales_lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        offer_lag_columns = [f'offer_lag_{i}' for i in range(1, lags + 1)]
+        all_features = sales_lag_columns + offer_lag_columns
+
+        # Fill NaN values with zeros in the lag features
+        specific_segment[all_features] = specific_segment[all_features].fillna(0)
+
+        X_train = specific_segment[:self.validation_end_date][all_features].values
+        Y_train = specific_segment[:self.validation_end_date]['sales']
+        
+        X_test = specific_segment[self.validation_end_date:][all_features].values
+        Y_test = specific_segment[self.validation_end_date:]['sales']
+
+        # Initialize and train the MLP Regressor model
+        self.model = MLPRegressor(
+                                hidden_layer_sizes=(200, 200, 200, 200, 100), 
+                                max_iter=500, 
+                                learning_rate='adaptive',
+                                random_state=42
+                                )
+        self.model.fit(X_train, Y_train)
+
+        # Make predictions
+        y_predict = self.model.predict(X_test)
+
+        mae = mean_absolute_error(Y_test, y_predict)
+        # Evaluating the model's performance overall MSE, R2, and MAE
+        print("MLP Regression daily MAE:", mean_absolute_error(Y_test, y_predict))
+        print("MLP Regression daily MSE:", mean_squared_error(Y_test, y_predict))
+        print("MLP Regression R2 Score:", r2_score(Y_test, y_predict))
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
+        print("Day-by-Day MAE Scores:", daily_mae_scores) 
+        return y_predict, Y_test, mae
+
+    def lightgbm_offer_date_predict(self, lags=14):
+        import lightgbm as lgb
+        from sklearn.metrics import r2_score, mean_absolute_error
+        # Create lag features for both sales and special_offer for the purpose of improve model performance
+        self.create_sales_lag_features(lags)
+        self.create_offer_lag_features(lags)
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+
+        # Prepare the features and target variable
+        sales_lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        offer_lag_columns = [f'offer_lag_{i}' for i in range(1, lags + 1)]
+        all_features = sales_lag_columns + offer_lag_columns
+
+        X_train = specific_segment[:self.validation_end_date][all_features].values
+        Y_train = specific_segment[:self.validation_end_date]['sales']
+        
+        X_test = specific_segment[self.validation_end_date:][all_features].values
+        Y_test = specific_segment[self.validation_end_date:]['sales']
+
+        # Initialize and train the LightGBM model
+        self.model = lgb.LGBMRegressor(
+                                    n_estimators=400, 
+                                    max_depth=30,
+                                    random_state=42,
+                                    learning_rate=0.01,
+                                    n_jobs=-1
+                                    )
+        self.model.fit(X_train, Y_train)
+
+        # Make predictions
+        y_predict = self.model.predict(X_test)
+
+        mae = mean_absolute_error(Y_test, y_predict)
+        # Evaluating the model's performance overall MSE, R2, and MAE
+        print("LightBGM MAE:", mean_absolute_error(Y_test, y_predict))
+        print("LightBGM MSE:", mean_squared_error(Y_test, y_predict))
+        print("LightBGM R2 Score:", r2_score(Y_test, y_predict))
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
+        print("Day-by-Day LightBGM Scores:", daily_mae_scores)
+        return y_predict, Y_test, mae
+
+    def xgboost_offer_date_predict(self, lags=28):
+        import xgboost as xgb
+        from sklearn.metrics import r2_score, mean_absolute_error
+        # Create lag features for both sales and special_offer
+        self.create_sales_lag_features(lags)
+        self.create_offer_lag_features(lags)
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+
+        # Prepare the features and target variable
+        sales_lag_columns = [f'lag_{i}' for i in range(1, lags + 1)]
+        offer_lag_columns = [f'offer_lag_{i}' for i in range(1, lags + 1)]
+        all_features = sales_lag_columns + offer_lag_columns
+
+        X_train = specific_segment[:self.validation_end_date][all_features].values
+        Y_train = specific_segment[:self.validation_end_date]['sales']
+        
+        X_test = specific_segment[self.validation_end_date:][all_features].values
+        Y_test = specific_segment[self.validation_end_date:]['sales']
+
+        # Initialize and train the XGBoost model
+        self.model = xgb.XGBRegressor(
+                                    n_estimators=200, 
+                                    max_depth=50,
+                                    random_state=42,
+                                    learning_rate=0.01,
+                                    n_jobs=-1
+                                    )
+        self.model.fit(X_train, Y_train)
+
+        # Make predictions
+        y_predict = self.model.predict(X_test)
+
+        mae = mean_absolute_error(Y_test, y_predict)
+        # Evaluating the model's performance overall MSE, R2, and MAE
+        print("XGBoost_Date&Offer MAE:", mean_absolute_error(Y_test, y_predict))
+        print("XGBoost_Date&Offer MSE:", mean_squared_error(Y_test, y_predict))
+        print("XGBoost_Date&Offer R2 Score:", r2_score(Y_test, y_predict))
+
+        # Day-by-day evaluation using MAE
+        daily_mae_scores = [mean_absolute_error([actual], [predicted]) for actual, predicted in zip(Y_test, y_predict)]
+        print("Day-by-Day MAE Scores:", daily_mae_scores)
+        return y_predict, Y_test, mae
 
 # %%
