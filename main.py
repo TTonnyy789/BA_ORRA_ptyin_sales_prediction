@@ -478,7 +478,7 @@ from forecasters import SalesForecaster, ZeroSalesForecaster
 ### Step 7-2  ####################################################################
 ###  Final prediction for all combinations of store and product
 
-# Get the first half of keys from your segmented data in order to reduce the computation time(running this on other laptop for the left half of the keys)
+# Get the FIRST half of keys from your segmented data in order to reduce the computation time(running this on other laptop for the left half of the keys)
 keys = list(SalesForecaster.segmented_data.keys())
 midpoint = len(keys) // 2
 first_half_keys = keys[:midpoint]
@@ -520,6 +520,44 @@ results_df_first_half.to_csv("results_first_half.csv")
 
 #%%#
 ### Step 7-3  ####################################################################
+###  Final prediction for all combinations of store and product
+
+# Get the SECOND half of keys from your segmented data in order to reduce the computation time(running this on other laptop for the left half of the keys)
+keys = list(SalesForecaster.segmented_data.keys())
+midpoint = len(keys) // 2
+second_half_keys = keys[midpoint:]
+
+# Create a DataFrame to hold the results
+results_df_second_half = pd.DataFrame(columns=['Store_Number', 'Product_Type', 'Model', 'MAE', 'Sales_Range', 'Average_Sales_Unit', 'Predicted_Value', 'Actual_Value'])
+
+
+for (store_number, product_type) in second_half_keys:
+    try:
+        forecaster = SalesForecaster(store_number=store_number, product_type=product_type)
+        # Receive the values from the forecasters.select_and_forecast() method, including the model used, MAE, predictions, sales range, average sales unit, and actual values for the purpose of final result visualization and evaluation
+        model_used, mae, predictions, sales_range, average_sales_unit, Y_test_list = forecaster.select_and_forecast()
+        temp_df = pd.DataFrame([{
+            'Store_Number': store_number,
+            'Product_Type': product_type,
+            'Model': model_used,
+            'MAE': mae,
+            'Sales_Range': sales_range,
+            'Average_Sales_Unit': average_sales_unit,
+            'Predicted_Value': predictions,
+            'Actual_Value':Y_test_list
+        }])
+        results_df_second_half = pd.concat([results_df_first_half, temp_df], ignore_index=True)
+
+    except Exception as e:
+        print(f"Error processing store {store_number}, product {product_type}: {e}")
+
+# Print the first few rows of the DataFrame
+print(results_df_second_half.head())
+results_df_second_half.to_csv("results_df_second_half.csv")
+
+
+#%%#
+### Step 7-3  ####################################################################
 ### Result visualization and evaluation
 
 # Load the data from CSV files
@@ -529,32 +567,54 @@ results_df_second_half = pd.read_csv("results_second_half.csv")
 # Concatenate the two dataframes
 results_df = pd.concat([results_df_first_half, results_df_second_half], ignore_index=True)
 
-# results_df = pd.concat([results_df_first_half, results_df_second_half], ignore_index=True)
-
 
 # Display summary statistics
 print("Summary Statistics:\n", results_df.describe())
+print('------------------------------------------------')
+print('\n')
+print("Summary Statistics for MAE:\n", results_df['MAE'].describe())
 
-# Check the distribution of MSE
-plt.figure(figsize=(10, 6))
-sns.histplot(results_df['MSE'], kde=True)
-plt.title('Distribution of Mean Squared Error (MSE)')
-plt.xlabel('MSE')
+# Check the distribution of MAE
+plt.figure(figsize=(22, 6))
+sns.histplot(results_df['MAE'], kde=True)
+plt.xlim(0, 250)
+plt.title('Distribution of MAE')
+plt.xlabel('MAE')
 plt.ylabel('Frequency')
 plt.show()
 
+# Group the results by the model used and calculate average MAE for each model
+average_mae_per_model = results_df.groupby('Model')['MAE'].mean()
+print("Average MAE per Model:\n", average_mae_per_model)
 
-# Group the results by the model used and calculate average MSE for each model
-average_mse_per_model = results_df.groupby('Model')['MSE'].mean()
-print("Average MSE per Model:\n", average_mse_per_model)
-
-# Bar plot of average MSE per model
-average_mse_per_model.plot(kind='bar', figsize=(10, 6))
-plt.title('Average MSE per Model')
+# Bar plot of average MAE per model
+average_mae_per_model.plot(kind='bar', figsize=(22, 6))
+plt.title('Average MAE per Model')
 plt.xlabel('Model')
-plt.ylabel('Average MSE')
+plt.ylabel('Average MAE')
+plt.show()
+
+palette1 = "rocket_r"
+# Boxplot for Sales Range
+plt.figure(figsize=(22, 6))
+sns.boxplot(data=results_df, x='Model', y='Sales_Range', fliersize = 10, linewidth = 3, saturation = 0.95, palette=palette1)
+plt.ylim(0, results_df['Sales_Range'].quantile(0.80))  # Adjusting y-axis to 95th percentile
+plt.title('Boxplot of Sales Range for Different Models')
+plt.xlabel('Model')
+plt.ylabel('Sales Range')
+plt.xticks(rotation=45)
+plt.show()
+
+palette2 = "vlag"
+# Boxplot for Average Sales Unit
+plt.figure(figsize=(22, 6))
+sns.boxplot(data=results_df, x='Model', y='Average_Sales_Unit', fliersize = 10, linewidth = 3, saturation = 0.95, palette=palette2)
+plt.ylim(0, results_df['Average_Sales_Unit'].quantile(0.80))  # Same adjustment for y-axis
+plt.title('Boxplot of Average Sales Unit for Different Models')
+plt.xlabel('Model')
+plt.ylabel('Average Sales Unit')
+plt.xticks(rotation=45)
 plt.show()
 
 
-
-
+# %%

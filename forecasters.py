@@ -1550,4 +1550,8 @@ class SalesForecaster:
         print('\n')
         return y_predict, Y_test, mae
 
+
+
+
+
 # %%
