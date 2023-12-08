@@ -19,11 +19,6 @@ def process_segment(group):
     return group.loc[first_non_zero_index:]
 
 class ZeroSalesForecaster:
-    def predict(self, periods):
-        return np.zeros(periods)
-
-
-class SalesForecaster:
     # Load the data from your local system
     product = pd.read_csv("/Users/ttonny0326/BA_ORRA/Python_Programming/Products_Information.csv")
     # Convert the 'date' column to datetime format and set it as the index
@@ -33,8 +28,57 @@ class SalesForecaster:
     product['product_type'] = product['product_type'].astype('category')
     # Create a dictionary for storing the store-product data sets
     segmented_data = {}
+    def __init__(self, store_number, product_type, train_end_date='2016-07-31', validation_end_date='2017-07-31'):
+        self.store_number = store_number
+        self.product_type = product_type
+        self.train_end_date = train_end_date
+        self.validation_end_date = validation_end_date
+        self.model = None
 
-    # Function to process each segment if the data starts with zero sales units
+    def predict_zero_sales(self, lags=28):
+        # Get the specific segment data
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+        # The number of predictions is determined by the length of the test set
+        num_predictions = len(specific_segment[self.validation_end_date:])
+        # Create a zero-filled NumPy array for the predictions
+        y_predict = np.zeros(num_predictions)
+        # Actual sales for the test period
+        Y_test = specific_segment[self.validation_end_date:]['sales']
+        # Calculate MAE for zero predictions
+        mae = mean_absolute_error(Y_test, y_predict)
+
+        # Printing performance metrics
+        print("Zero Sales Prediction MAE:", mae)
+        daily_mae_scores = [mean_absolute_error([actual], [0]) for actual in Y_test]
+        print("Day-by-Day MAE Scores:", daily_mae_scores)
+        print('------------------------------------------')
+        print('\n')
+
+        return y_predict, Y_test, mae
+
+    def select_and_forecast(self):
+        # Get the specific segment data
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+
+        # Check if the segment has only zero sales
+        if specific_segment['sales'].sum() == 0:
+            return self.predict_zero_sales()
+        else:
+            raise ValueError("This segment has non-zero sales and is not suitable for zero sales prediction.")
+
+
+class SalesForecaster:
+    ## Load the data from your local system
+    product = pd.read_csv("/Users/ttonny0326/BA_ORRA/Python_Programming/Products_Information.csv")
+    ## Convert the 'date' column to datetime format and set it as the index
+    product['date'] = pd.to_datetime(product['date'])
+    product.set_index('date', inplace=True)
+    ## Ensure 'product_type' is of categorical
+    product['product_type'] = product['product_type'].astype('category')
+    ## Create a dictionary for storing the store-product data sets
+    segmented_data = {}
+
+    #3 Function to process each segment if the data starts with zero sales units
     def process_segment(group):
         # Remove initial zero sales
         first_non_zero_index = group['sales'].ne(0).idxmax()
@@ -44,13 +88,31 @@ class SalesForecaster:
         processed_group = process_segment(group)
         segmented_data[(store, product_type)] = processed_group[['sales', 'special_offer', 'id', 'store_nbr']]
     
-    # Initialize the class values
     def __init__(self, store_number, product_type, train_end_date='2016-07-31', validation_end_date='2017-07-31'):
         self.store_number = store_number
         self.product_type = product_type
         self.train_end_date = train_end_date
         self.validation_end_date = validation_end_date
         self.model = None
+
+    def forecast_with_linear_regression(self):
+        # Get the specific segment data
+        specific_segment = self.segmented_data[(self.store_number, self.product_type)]
+        
+        # Calculate the sales range and average sales unit
+        sales_range = specific_segment['sales'].max() - specific_segment['sales'].min()
+        average_sales_unit = specific_segment['sales'].mean()
+
+        Y_test = None
+
+        # Apply the Linear Regression model
+        y_predict, Y_test, mae = self.linear_offer_date_predict()
+
+        # Convert Y_test to a list for consistency
+        Y_test_list = Y_test.tolist() if Y_test is not None else []
+
+        # Return the results
+        return "Linear Regression", mae, y_predict, sales_range, average_sales_unit, Y_test_list
 
     def select_and_forecast(self):
         # Get the specific segment data
@@ -89,30 +151,6 @@ class SalesForecaster:
 
         # Return the best model, MAE, predictions, sales range, average sales unit, and Y_test
         return best_model, best_mae, y_predict, sales_range, average_sales_unit, Y_test_list
-    
-    def zero_sales_predict(self):
-        # Determine the length of the test set
-        test_set_length = len(self.segmented_data[(self.store_number, self.product_type)][self.validation_end_date:])
-
-        # Predictions are zeros
-        predictions = [0] * test_set_length
-
-        # There are no actuals, so MSE will be zero
-        mse = 0
-
-        # Plotting the forecast alongside an empty plot (no actuals for zero sales)
-        if test_set_length > 0:
-            # Only create a plot if there are samples in the test set
-            dates = pd.date_range(start=self.validation_end_date, periods=test_set_length, freq='D')
-            plt.figure(figsize=(22, 6))
-            plt.plot(dates, predictions, color='green', label='Predicted Sales')
-            plt.title(f'Zero Sales Prediction for Store {self.store_number} - Product {self.product_type}')
-            plt.xlabel('Date')
-            plt.ylabel('Sales')
-            plt.legend()
-            plt.show()
-
-        return predictions, None, mse
 
     def create_sales_lag_features(self, lags=12):
         # using the self.segmented_data to create the lag features for the sales column
