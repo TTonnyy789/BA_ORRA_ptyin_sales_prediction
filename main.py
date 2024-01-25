@@ -691,8 +691,8 @@ print(overall_average_relative_mae)
 ### Result visualization and evaluation by implementing the best model selection approach for each store-product combination
 
 ## Load the data from CSV files
-results_df_first_half = pd.read_csv("results_first_half.csv")
-results_df_second_half = pd.read_csv("results_df_second_half.csv")
+results_df_first_half = pd.read_csv("/Users/ttonny0326/GitHub_Project/BA_ORRA_python_Grocery_prediction/results_first_half.csv")
+results_df_second_half = pd.read_csv("/Users/ttonny0326/GitHub_Project/BA_ORRA_python_Grocery_prediction/results_second_half.csv")
 
 ## Concatenate the two dataframes
 results_df = pd.concat([results_df_first_half, results_df_second_half], ignore_index=True)
