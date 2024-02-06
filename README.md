@@ -1,3 +1,6 @@
+<!-- ![image](https://github.com/DSkapinakis/sales-time-series-forecasting-ml-models/assets/136902596/3079e6b1-6974-4591-ba37-374f493b3cf2) -->
+
+
 # Grocery Sales Prediction Project
 
 This project aims to analyze and predict grocery sales using advanced machine learning techniques. Utilizing a variety of Python libraries and models, it forecasts sales trends, which assists in inventory management and strategic decision-making.
